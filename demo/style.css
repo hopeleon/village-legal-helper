@@ -1,0 +1,299 @@
+﻿:root {
+  --bg: #f4f0e8;
+  --panel: #ffffff;
+  --ink: #1b1b1b;
+  --muted: #6a6a6a;
+  --accent: #2f6f3e;
+  --accent-2: #f0b429;
+  --border: #e7e2d7;
+  --shadow: 0 10px 25px rgba(0,0,0,0.08);
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Noto Serif SC", "Source Han Serif SC", "Songti SC", serif;
+  background: linear-gradient(180deg, #f4f0e8 0%, #efe7d6 100%);
+  color: var(--ink);
+  min-height: 100vh;
+}
+.page {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  min-height: 100vh;
+  gap: 18px;
+  padding: 24px;
+}
+.sidebar {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.brand {
+  font-size: 18px;
+  font-weight: 700;
+}
+.side-title {
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+.history-item {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fffdf7;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  line-height: 1.4;
+}
+.history-item:hover {
+  background: #f2f7f3;
+}
+.history-item.active {
+  border-color: var(--accent);
+  background: #eaf4ed;
+}
+.main {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+}
+.main-head h1 {
+  font-size: 28px;
+  margin: 0 0 6px;
+}
+.main-head p {
+  margin: 0;
+  color: var(--muted);
+}
+.row {
+  display: flex;
+  gap: 12px;
+}
+input {
+  flex: 1;
+  padding: 12px 14px;
+  font-size: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+button {
+  padding: 12px 18px;
+  font-size: 16px;
+  border: none;
+  background: var(--accent);
+  color: white;
+  border-radius: 10px;
+  cursor: pointer;
+}
+button:hover { background: #255b33; }
+.ghost {
+  background: #ffffff;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+.ghost:hover {
+  background: #f2f7f3;
+}
+.full {
+  width: 100%;
+}
+.status {
+  margin: 0 0 6px;
+  color: var(--muted);
+  min-height: 18px;
+}
+.chat {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fffdf7;
+  min-height: 260px;
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.composer {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fffdf7;
+}
+.msg {
+  display: flex;
+  gap: 10px;
+}
+.msg.user {
+  flex-direction: row-reverse;
+}
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #f0eadf;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  color: var(--accent);
+  border: 1px solid var(--border);
+}
+.msg.user .avatar {
+  background: #e7f2ea;
+}
+.bubble {
+  max-width: 78%;
+  background: #f9f4e9;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.msg.user .bubble {
+  background: #f1f7f2;
+}
+.msg-text {
+  font-size: 15px;
+}
+.msg-laws {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+.card {
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: #fffdf7;
+  color: var(--muted);
+  font-size: 14px;
+}
+.law-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.04);
+  overflow: hidden;
+}
+.law-card summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 8px 10px;
+  background: #f7f2e7;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  row-gap: 2px;
+}
+.law-card:not([open]) summary {
+  max-height: calc(2 * 1.2em + 2px + 16px);
+  overflow: hidden;
+}
+.law-card summary::after {
+  content: "";
+}
+.law-card summary::-webkit-details-marker {
+  display: none;
+}
+.law-card[open] summary {
+  background: #f1f7f2;
+}
+.law-title {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  align-items: center;
+  font-weight: 700;
+  font-size: 16px;
+  overflow: hidden;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.law-name {
+  color: var(--ink);
+}
+.law-article {
+  color: var(--accent);
+}
+.law-sub {
+  margin-top: 2px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  overflow: hidden;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.law-tag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #ffffff;
+  color: var(--accent);
+  font-weight: 600;
+}
+.law-snippet {
+  flex: 1;
+}
+.law-title,
+.law-sub,
+.law-snippet {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+}
+.law-title {
+  max-height: 1.2em;
+}
+.law-sub {
+  max-height: 1.2em;
+}
+.law-body {
+  display: none;
+  padding: 12px 14px;
+  background: #fffdf7;
+}
+.law-card[open] .law-body {
+  display: block;
+}
+.law-full {
+  white-space: pre-wrap;
+  line-height: 1.7;
+  font-size: 14px;
+}
+@media (max-width: 640px) {
+  .page {
+    grid-template-columns: 1fr;
+    padding: 12px;
+  }
+  .row { flex-direction: column; }
+  button { width: 100%; }
+  .bubble { max-width: 100%; }
+}
