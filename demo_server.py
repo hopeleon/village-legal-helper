@@ -6,7 +6,7 @@ import os
 import re
 import time
 from collections import Counter
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import parse_qs, urlparse
@@ -228,8 +228,8 @@ def _build_messages(query: str, passages: list, stream: bool, context: str = "")
             {
                 "role": "system",
                 "content": (
-                    "你是乡村法律咨询助手。根据给定法条节选生成整体答复，"
-                    "避免下结论或替代律师意见。只输出纯文本。"
+                    "你是乡村法律小帮手。根据给定法条节选，用更亲切、易懂的口吻"
+                    "给出说明与建议，避免下结论或替代律师意见。只输出纯文本。"
                 ),
             },
             {
@@ -237,7 +237,7 @@ def _build_messages(query: str, passages: list, stream: bool, context: str = "")
                 "content": (
                     f"{user_content}\n\n"
                     "请直接输出整体答复（3-6句）并给出可执行建议（1-3条）。"
-                    "不要标题、不要编号、不要JSON。"
+                    "语气要温和、贴近乡村场景，不要标题、不要编号、不要JSON。"
                 ),
             },
         ]
@@ -245,8 +245,8 @@ def _build_messages(query: str, passages: list, stream: bool, context: str = "")
         {
             "role": "system",
             "content": (
-                "你是乡村法律咨询助手。根据给定法条节选生成整体答复，"
-                "避免下结论或替代律师意见。仅输出JSON，不要任何额外文字。"
+                "你是乡村法律小帮手。根据给定法条节选，用更亲切、易懂的口吻"
+                "给出说明与建议，避免下结论或替代律师意见。仅输出JSON，不要任何额外文字。"
             ),
         },
         {
@@ -254,7 +254,8 @@ def _build_messages(query: str, passages: list, stream: bool, context: str = "")
             "content": (
                 f"{user_content}\n\n"
                 "请严格只输出JSON，格式：{\"answer\":\"...\"}。\n"
-                "answer为简明整体答复（3-6句）并给出可执行建议（1-3条）；"
+                "answer为简明整体答复（3-6句）并给出可执行建议（1-3条），"
+                "语气要温和、贴近乡村场景；"
                 "不得输出任何说明文字或Markdown。"
             ),
         },
@@ -404,7 +405,11 @@ def call_deepseek_answer_stream(query: str, passages: list, context: str = ""):
 
 
 def _fallback_answer():
-    return "根据检索到的相关法条，可以先整理事实与证据，明确当事人、时间、地点和主要争议点。建议先与村委、司法所或调解组织沟通，必要时咨询律师，依法通过调解或诉讼方式维护权益。"
+    return (
+        "先把事情的时间、地点、涉及人员和关键证据整理清楚（如照片、视频、聊天记录等）。"
+        "可以先找村委、司法所或调解组织帮忙沟通，必要时再咨询律师。"
+        "后续若需要维权，也可以走调解或依法起诉的路径。"
+    )
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -419,8 +424,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "keep-alive")
+        self.send_header("Connection", "close")
         self.end_headers()
+        self.close_connection = True
 
     def _sse_send(self, payload: dict):
         data = json.dumps(payload, ensure_ascii=False)
@@ -476,7 +482,7 @@ class Handler(BaseHTTPRequestHandler):
             ]
             if stream:
                 self._send_sse_headers()
-                self._sse_send({"type": "status", "message": "生成整体答复中..."})
+                self._sse_send({"type": "status", "message": "正在整理思路，马上回复你..."})
 
                 answer = ""
                 gen_error = None
@@ -491,7 +497,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not answer:
                     answer = _fallback_answer()
                     if gen_error:
-                        self._sse_send({"type": "status", "message": "模型响应异常，已使用默认答复。"})
+                        self._sse_send({"type": "status", "message": "模型暂时没响应，先给你一份通用建议。"})
                     self._sse_send({"type": "answer_delta", "delta": answer})
 
                 self._sse_send({"type": "laws", "count": len(results), "results": results})
@@ -543,4 +549,4 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     print("Demo server running on http://localhost:8000")
-    HTTPServer(("", 8000), Handler).serve_forever()
+    ThreadingHTTPServer(("", 8000), Handler).serve_forever()

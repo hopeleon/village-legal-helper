@@ -1,25 +1,26 @@
-﻿:root {
-  --bg: #f4f0e8;
+:root {
+  --bg: #f4efe2;
   --panel: #ffffff;
   --ink: #1b1b1b;
   --muted: #6a6a6a;
   --accent: #2f6f3e;
-  --accent-2: #f0b429;
-  --border: #e7e2d7;
+  --accent-2: #c79b3a;
+  --border: #e2dccf;
   --shadow: 0 10px 25px rgba(0,0,0,0.08);
+  --field: #fff7e9;
 }
 * { box-sizing: border-box; }
 body {
   margin: 0;
   font-family: "Noto Serif SC", "Source Han Serif SC", "Songti SC", serif;
-  background: linear-gradient(180deg, #f4f0e8 0%, #efe7d6 100%);
+  background: var(--bg);
   color: var(--ink);
   min-height: 100vh;
 }
 .page {
   display: grid;
   grid-template-columns: 260px 1fr;
-  min-height: 100vh;
+  height: 100vh;
   gap: 18px;
   padding: 24px;
 }
@@ -78,6 +79,7 @@ body {
   flex-direction: column;
   gap: 14px;
   min-height: 0;
+  height: 100%;
 }
 .main-head h1 {
   font-size: 28px;
@@ -86,6 +88,14 @@ body {
 .main-head p {
   margin: 0;
   color: var(--muted);
+}
+.head-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.mobile-only {
+  display: none;
 }
 .row {
   display: flex;
@@ -128,8 +138,8 @@ button:hover { background: #255b33; }
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px;
-  background: #fffdf7;
-  min-height: 260px;
+  background: var(--field);
+  min-height: 0;
   flex: 1;
   overflow-y: auto;
   display: flex;
@@ -140,7 +150,10 @@ button:hover { background: #255b33; }
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px;
-  background: #fffdf7;
+  background: #ffffff;
+  position: sticky;
+  bottom: 12px;
+  z-index: 2;
 }
 .msg {
   display: flex;
@@ -165,7 +178,7 @@ button:hover { background: #255b33; }
 }
 .bubble {
   max-width: 78%;
-  background: #f9f4e9;
+  background: #f7f2e6;
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 12px 14px;
@@ -173,7 +186,7 @@ button:hover { background: #255b33; }
   white-space: pre-wrap;
 }
 .msg.user .bubble {
-  background: #f1f7f2;
+  background: #f7f2e6;
 }
 .msg-text {
   font-size: 15px;
@@ -276,12 +289,11 @@ button:hover { background: #255b33; }
   max-height: 1.2em;
 }
 .law-body {
-  display: none;
-  padding: 12px 14px;
+  margin: 0;
+  font-family: "Noto Serif SC", "Source Han Serif SC", "Songti SC", serif;
   background: #fffdf7;
-}
-.law-card[open] .law-body {
-  display: block;
+  color: var(--ink);
+  padding: 10px 12px 12px;
 }
 .law-full {
   white-space: pre-wrap;
@@ -289,11 +301,95 @@ button:hover { background: #255b33; }
   font-size: 14px;
 }
 @media (max-width: 640px) {
-  .page {
+  body {
+  margin: 0;
+  font-family: "Noto Serif SC", "Source Han Serif SC", "Songti SC", serif;
+  background: var(--bg);
+  color: var(--ink);
+  min-height: 100vh;
+}.page {
     grid-template-columns: 1fr;
     padding: 12px;
+    height: 100vh;
+  }
+  .main-head h1 {
+    font-size: 22px;
+  }
+  .main-head p {
+    font-size: 13px;
+  }
+  .chat {
+    padding: 10px;
+    gap: 10px;
+  }
+  .bubble {
+    padding: 10px 12px;
+  }
+  .composer {
+    padding: 10px;
+  }
+  .status {
+    font-size: 12px;
+  }
+  input {
+    font-size: 14px;
+    padding: 10px 12px;
+  }
+  button {
+    font-size: 14px;
+    padding: 10px 14px;
+  }
+  .history-item {
+    font-size: 12px;
+  }
+  .law-title {
+    font-size: 14px;
+  }
+  .law-sub {
+    font-size: 12px;
+  }
+  .law-full {
+    font-size: 13px;
+  }
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    width: min(320px, 86vw);
+    z-index: 20;
+    transform: translateX(-110%);
+    transition: transform 0.2s ease;
+  }
+  .page::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.28);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    z-index: 10;
+  }
+  body.sidebar-open .sidebar {
+    transform: translateX(0);
+  }
+  body.sidebar-open .page::before {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .main {
+    height: 100%;
+  }
+  .head-row {
+    align-items: center;
+  }
+  .mobile-only {
+    display: inline-flex;
+    white-space: nowrap;
   }
   .row { flex-direction: column; }
   button { width: 100%; }
+  .mobile-only { width: auto; }
   .bubble { max-width: 100%; }
 }

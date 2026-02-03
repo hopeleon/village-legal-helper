@@ -32,6 +32,7 @@ function addHistoryEntry(text, targetIndex) {
       target.scrollIntoView({ behavior: "smooth", block: "start" });
       markActiveHistory(item);
     }
+    setSidebarOpen(false);
   });
   $("historyList").prepend(item);
   markActiveHistory(item);
@@ -201,12 +202,12 @@ async function streamSearch(q, context, assistantIndex) {
             gotAnswer = true;
           } else if (payload.type === "laws") {
             const count = payload.count ?? (payload.results || []).length;
-            $("status").textContent = `找到 ${count} 条相关法条`;
+            $("status").textContent = `找到了 ${count} 条相关法条`;
             updateAssistantLaws(assistantIndex, payload.results || []);
           } else if (payload.type === "done") {
             const msg = history[assistantIndex];
             if (!gotAnswer && msg && !msg.text.trim()) {
-              updateAssistantText(assistantIndex, "未能生成答复。");
+              updateAssistantText(assistantIndex, "暂时没能生成完整答复，我再试试。");
             }
             return true;
           }
@@ -222,11 +223,11 @@ async function streamSearch(q, context, assistantIndex) {
 async function search() {
   const q = $("query").value.trim();
   if (!q) {
-    $("status").textContent = "请输入咨询内容";
+    $("status").textContent = "先说说你的情况吧";
     return;
   }
   $("query").value = "";
-  $("status").textContent = "检索中...";
+  $("status").textContent = "正在帮你查找相关法条...";
   const context = buildContext();
   const userIndex = addMessage("user", q);
   addHistoryEntry(q, userIndex);
@@ -239,8 +240,8 @@ async function search() {
     `/search?q=${encodeURIComponent(q)}&context=${encodeURIComponent(context)}`
   );
   const data = await res.json();
-  $("status").textContent = `找到 ${data.count} 条相关法条`;
-  updateAssistantText(assistantIndex, data.answer || "未能生成答复。");
+  $("status").textContent = `找到了 ${data.count} 条相关法条`;
+  updateAssistantText(assistantIndex, data.answer || "暂时没能生成完整答复，我再试试。");
   updateAssistantLaws(assistantIndex, data.results || []);
 }
 
@@ -249,23 +250,45 @@ $("query").addEventListener("keydown", (e) => {
   if (e.key === "Enter") search();
 });
 
+function setSidebarOpen(open) {
+  document.body.classList.toggle("sidebar-open", Boolean(open));
+}
+
+const toggleSidebar = document.getElementById("toggleSidebar");
+if (toggleSidebar) {
+  toggleSidebar.addEventListener("click", () => {
+    const isOpen = document.body.classList.contains("sidebar-open");
+    setSidebarOpen(!isOpen);
+  });
+}
+
+document.addEventListener("click", (event) => {
+  if (!document.body.classList.contains("sidebar-open")) return;
+  const sidebar = document.querySelector(".sidebar");
+  const isToggle = event.target && event.target.id === "toggleSidebar";
+  if (sidebar && !sidebar.contains(event.target) && !isToggle) {
+    setSidebarOpen(false);
+  }
+});
+
 $("fill").addEventListener("click", async () => {
-  $("status").textContent = "载入示例中...";
+  $("status").textContent = "正在准备示例...";
   const samples = await loadSamples();
   if (!samples.length) {
-    $("status").textContent = "示例加载失败，请稍后再试";
+    $("status").textContent = "示例没能加载成功，请稍后再试";
     return;
   }
   const pick = samples[sampleCursor % samples.length];
   sampleCursor += 1;
   $("query").value = pick;
-  $("status").textContent = "已填充示例，可直接查询";
+  $("status").textContent = "已填好示例，可以直接提问";
 });
 
 $("newChat").addEventListener("click", () => {
   history.length = 0;
   $("chat").innerHTML = "";
   $("historyList").innerHTML = "";
-  $("status").textContent = "已开启新对话";
+  $("status").textContent = "已重新开始对话";
   $("query").value = "";
+  setSidebarOpen(false);
 });

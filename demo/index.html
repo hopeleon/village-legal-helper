@@ -3,22 +3,27 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>乡村振兴法律咨询 Demo</title>
+  <title>乡村法律小帮手</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <main class="page">
     <aside class="sidebar">
       <div class="brand">乡村法律咨询</div>
-      <button id="newChat" class="ghost full">开启新对话</button>
-      <div class="side-title">历史对话</div>
+      <button id="newChat" class="ghost full">重新开始</button>
+      <div class="side-title">本次对话</div>
       <div id="historyList" class="history-list"></div>
     </aside>
 
     <section class="main">
       <header class="main-head">
-        <h1>有什么可以帮忙的？</h1>
-        <p>输入村民咨询案情，系统返回相关法条与初步建议。</p>
+        <div class="head-row">
+          <button id="toggleSidebar" class="ghost mobile-only">查看对话</button>
+          <div>
+            <h1>有什么可以帮到您</h1>
+            <p>描述您的情况，我将结合相关法条给出建议。</p>
+          </div>
+        </div>
       </header>
 
       <div id="chat" class="chat"></div>
@@ -26,9 +31,9 @@
       <div class="composer">
         <div id="status" class="status"></div>
         <div class="row">
-          <input id="query" type="text" placeholder="例如：村里有人乱倒垃圾影响农田" />
-          <button id="search">发送</button>
-          <button id="fill" class="ghost">示例一键填充</button>
+          <input id="query" type="text" placeholder="例如：村里有人乱倒垃圾，影响农田" />
+          <button id="search">提问</button>
+          <button id="fill" class="ghost">看个示例</button>
         </div>
       </div>
     </section>
