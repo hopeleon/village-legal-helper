@@ -18,7 +18,7 @@
    python demo_server.py
    ```
 3. 浏览器访问  
-   - http://localhost:8000
+   - http://localhost:9000
 
 ## 目录结构
 - `demo_server.py`：后端服务（检索 + 调用大模型）  
