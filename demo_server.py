@@ -548,5 +548,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print("Demo server running on http://localhost:8000")
-    ThreadingHTTPServer(("", 8000), Handler).serve_forever()
+    print("Demo server running on http://localhost:9000")
+    ThreadingHTTPServer(("", 9000), Handler).serve_forever()
