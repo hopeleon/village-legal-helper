@@ -49,6 +49,50 @@ STOPWORDS = {
     "规定",
 }
 
+LEGAL_KEYWORDS = {
+    "法",
+    "法律",
+    "法条",
+    "法规",
+    "规定",
+    "条例",
+    "责任",
+    "处罚",
+    "维权",
+    "起诉",
+    "立案",
+    "诉讼",
+    "仲裁",
+    "调解",
+    "赔偿",
+    "合同",
+    "侵权",
+    "欠款",
+    "拖欠",
+    "劳动",
+    "用工",
+    "工资",
+    "婚姻",
+    "离婚",
+    "赡养",
+    "抚养",
+    "土地",
+    "宅基地",
+    "征地",
+    "耕地",
+    "纠纷",
+    "环保",
+    "污染",
+    "垃圾",
+    "污水",
+    "家暴",
+    "未成年",
+    "诈骗",
+    "治安",
+    "报警",
+    "律师",
+}
+
 # Keyword -> preferred laws (used to boost recall for typical rural cases)
 TOPIC_LAW_BOOSTS = {
     "家暴": ["中华人民共和国反家庭暴力法", "中华人民共和国妇女权益保障法", "中华人民共和国民法典"],
@@ -174,6 +218,21 @@ def expand_query(raw_query: str, tokens: list):
     return expanded
 
 
+def is_legal_query(raw_query: str, tokens: list):
+    if not raw_query:
+        return False
+    for key in TOPIC_LAW_BOOSTS.keys():
+        if key in raw_query:
+            return True
+    for key in LEGAL_KEYWORDS:
+        if key in raw_query:
+            return True
+    for t in tokens:
+        if t in LEGAL_KEYWORDS:
+            return True
+    return False
+
+
 def load_chunks():
     if not DATA_FILE.exists():
         return []
@@ -211,10 +270,12 @@ LLM_DEBUG = os.getenv("LLM_DEBUG", "0") == "1"
 
 
 def _build_user_content(query: str, passages: list, context: str = ""):
-    content_lines = [f"用户咨询：{query}", "相关法条节选："]
-    for i, p in enumerate(passages, 1):
-        title = f"{p.get('law','')}{p.get('article','')}"
-        content_lines.append(f"{i}. {title}：{p.get('text','')}")
+    content_lines = [f"用户咨询：{query}"]
+    if passages:
+        content_lines.append("相关法条节选：")
+        for i, p in enumerate(passages, 1):
+            title = f"{p.get('law','')}{p.get('article','')}"
+            content_lines.append(f"{i}. {title}：{p.get('text','')}")
     if context:
         content_lines.append("历史对话：")
         content_lines.append(context)
@@ -256,6 +317,46 @@ def _build_messages(query: str, passages: list, stream: bool, context: str = "")
                 "请严格只输出JSON，格式：{\"answer\":\"...\"}。\n"
                 "answer为简明整体答复（3-6句）并给出可执行建议（1-3条），"
                 "语气要温和、贴近乡村场景；"
+                "不得输出任何说明文字或Markdown。"
+            ),
+        },
+    ]
+
+
+def _build_messages_general(query: str, stream: bool, context: str = ""):
+    user_content = _build_user_content(query, [], context=context)
+    if stream:
+        return [
+            {
+                "role": "system",
+                "content": (
+                    "你是乡村法律小帮手。若问题不涉及法律，给出清晰可执行的建议即可，"
+                    "不要强行引用法条。只输出纯文本。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"{user_content}\n\n"
+                    "请直接输出整体答复（2-4句），语气温和、贴近乡村场景。"
+                    "不要标题、不要编号、不要JSON。"
+                ),
+            },
+        ]
+    return [
+        {
+            "role": "system",
+            "content": (
+                "你是乡村法律小帮手。若问题不涉及法律，给出清晰可执行的建议即可，"
+                "不要强行引用法条。仅输出JSON，不要任何额外文字。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"{user_content}\n\n"
+                "请严格只输出JSON，格式：{\"answer\":\"...\"}。\n"
+                "answer为简明整体答复（2-4句），语气温和、贴近乡村场景；"
                 "不得输出任何说明文字或Markdown。"
             ),
         },
@@ -355,15 +456,147 @@ def call_deepseek_answer(query: str, passages: list, context: str = ""):
         return None, f"call_failed:{type(e).__name__}", None
 
 
+def call_deepseek_answer_general(query: str, context: str = ""):
+    if not LLM_API_KEY:
+        return None, "missing_api_key", None
+
+    payload = {
+        "model": LLM_MODEL,
+        "messages": _build_messages_general(query, stream=False, context=context),
+        "temperature": 0.1,
+        "max_tokens": 280,
+        "stream": False,
+    }
+
+    url = f"{LLM_BASE_URL}/chat/completions"
+
+    def _extract_json(text: str):
+        try:
+            return json.loads(text)
+        except Exception:
+            pass
+        fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
+        if fenced:
+            try:
+                return json.loads(fenced.group(1))
+            except Exception:
+                pass
+        obj = re.search(r"(\{.*\})", text, re.S)
+        if obj:
+            try:
+                return json.loads(obj.group(1))
+            except Exception:
+                pass
+        return None
+
+    def _post(payload_obj):
+        req = Request(
+            url,
+            data=json.dumps(payload_obj).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {LLM_API_KEY}",
+            },
+            method="POST",
+        )
+        with urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return data
+
+    try:
+        data = _post(payload)
+        content = data["choices"][0]["message"]["content"]
+        parsed = _extract_json(content)
+        if isinstance(parsed, dict) and isinstance(parsed.get("answer"), str):
+            return parsed["answer"].strip(), None, content
+        if not isinstance(parsed, dict):
+            retry = {
+                **payload,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "只输出有效JSON，禁止任何其它字符。",
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"{_build_user_content(query, [], context=context)}\n\n"
+                            "输出格式：{\"answer\":\"...\"}，只允许JSON文本。"
+                        ),
+                    },
+                ],
+            }
+            data = _post(retry)
+            content = data["choices"][0]["message"]["content"]
+            parsed = _extract_json(content)
+            if isinstance(parsed, dict) and isinstance(parsed.get("answer"), str):
+                return parsed["answer"].strip(), None, content
+            return content.strip(), "bad_json", content
+        return content.strip(), "bad_json_schema", content
+    except (URLError, KeyError, ValueError, IndexError) as e:
+        return None, f"call_failed:{type(e).__name__}", None
+
+
 def call_deepseek_answer_stream(query: str, passages: list, context: str = ""):
     if not LLM_API_KEY:
-        return None, "missing_api_key", ""
+        yield "", "missing_api_key"
+        return
 
     payload = {
         "model": LLM_MODEL,
         "messages": _build_messages(query, passages, stream=True, context=context),
         "temperature": 0.1,
         "max_tokens": 300,
+        "stream": True,
+    }
+
+    url = f"{LLM_BASE_URL}/chat/completions"
+    req = Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {LLM_API_KEY}",
+        },
+        method="POST",
+    )
+
+    def _iter_stream(resp):
+        for raw_line in resp:
+            if not raw_line:
+                continue
+            line = raw_line.decode("utf-8").strip()
+            if not line or not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                payload = json.loads(data)
+            except Exception:
+                continue
+            delta = payload.get("choices", [{}])[0].get("delta", {}).get("content")
+            if delta:
+                yield delta
+
+    try:
+        with urlopen(req, timeout=30) as resp:
+            for delta in _iter_stream(resp):
+                yield delta, None
+    except (URLError, ValueError, KeyError) as e:
+        yield "", f"call_failed:{type(e).__name__}"
+
+
+def call_deepseek_answer_stream_general(query: str, context: str = ""):
+    if not LLM_API_KEY:
+        yield "", "missing_api_key"
+        return
+
+    payload = {
+        "model": LLM_MODEL,
+        "messages": _build_messages_general(query, stream=True, context=context),
+        "temperature": 0.1,
+        "max_tokens": 280,
         "stream": True,
     }
 
@@ -412,6 +645,14 @@ def _fallback_answer():
     )
 
 
+def _fallback_general_answer():
+    return (
+        "这类问题可能不涉及具体法条，我可以先给出一般建议。"
+        "你可以把情况再说明得更具体一些（时间、地点、涉及人员、诉求）。"
+        "如果后续确实牵涉权益或纠纷，再帮你对应法律依据。"
+    )
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, body: bytes, content_type: str = "text/plain; charset=utf-8"):
         self.send_response(200)
@@ -444,6 +685,9 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/style.css":
             body = (DEMO_DIR / "style.css").read_bytes()
             return self._send(body, "text/css; charset=utf-8")
+        if parsed.path == "/asr_helper.js":
+            body = (DEMO_DIR / "asr_helper.js").read_bytes()
+            return self._send(body, "text/javascript; charset=utf-8")
         if parsed.path == "/sample_cases.txt":
             body = (DEMO_DIR / "sample_cases.txt").read_bytes()
             return self._send(body, "text/plain; charset=utf-8")
@@ -455,10 +699,11 @@ class Handler(BaseHTTPRequestHandler):
                 context = context[:1200]
             tokens = tokenize(q)
             tokens = expand_query(q, tokens)
-            top = bm25_score(INDEX, tokens, top_n=5, raw_query=q) if q else []
+            legal_query = is_legal_query(q, tokens)
+            top = bm25_score(INDEX, tokens, top_n=5, raw_query=q) if (q and legal_query) else []
 
             # If still empty, fall back to boosted laws directly
-            if not top and q:
+            if not top and q and legal_query:
                 boost_laws = []
                 for key, laws in TOPIC_LAW_BOOSTS.items():
                     if key in q:
@@ -480,13 +725,18 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 for item in top
             ]
+            recommend_laws = bool(legal_query and results)
             if stream:
                 self._send_sse_headers()
-                self._sse_send({"type": "status", "message": "正在整理思路，马上回复你..."})
+                if recommend_laws:
+                    self._sse_send({"type": "status", "message": "正在整理思路，马上回复你..."})
+                else:
+                    msg = "未找到匹配法条，先给你直接建议。" if legal_query else "该问题不一定涉及法条，先给你直接建议。"
+                    self._sse_send({"type": "status", "message": msg})
 
                 answer = ""
                 gen_error = None
-                if LLM_PROVIDER == "deepseek" and top:
+                if LLM_PROVIDER == "deepseek" and recommend_laws:
                     for delta, err in call_deepseek_answer_stream(q, top, context=context):
                         if err:
                             gen_error = err
@@ -494,13 +744,29 @@ class Handler(BaseHTTPRequestHandler):
                         if delta:
                             answer += delta
                             self._sse_send({"type": "answer_delta", "delta": delta})
+                if LLM_PROVIDER == "deepseek" and not recommend_laws:
+                    for delta, err in call_deepseek_answer_stream_general(q, context=context):
+                        if err:
+                            gen_error = err
+                            break
+                        if delta:
+                            answer += delta
+                            self._sse_send({"type": "answer_delta", "delta": delta})
                 if not answer:
-                    answer = _fallback_answer()
+                    answer = _fallback_answer() if recommend_laws else _fallback_general_answer()
                     if gen_error:
                         self._sse_send({"type": "status", "message": "模型暂时没响应，先给你一份通用建议。"})
                     self._sse_send({"type": "answer_delta", "delta": answer})
 
-                self._sse_send({"type": "laws", "count": len(results), "results": results})
+                self._sse_send(
+                    {
+                        "type": "laws",
+                        "count": len(results),
+                        "results": results,
+                        "recommend": recommend_laws,
+                        "legal_query": legal_query,
+                    }
+                )
                 if LLM_DEBUG:
                     self._sse_send(
                         {
@@ -518,17 +784,22 @@ class Handler(BaseHTTPRequestHandler):
             generated = None
             gen_error = None
             gen_raw = None
-            if LLM_PROVIDER == "deepseek" and top:
+            if LLM_PROVIDER == "deepseek" and recommend_laws:
                 generated, gen_error, gen_raw = call_deepseek_answer(q, top, context=context)
                 time.sleep(0.1)
+            if LLM_PROVIDER == "deepseek" and not recommend_laws:
+                generated, gen_error, gen_raw = call_deepseek_answer_general(q, context=context)
+                time.sleep(0.1)
             if not generated:
-                generated = _fallback_answer()
+                generated = _fallback_answer() if recommend_laws else _fallback_general_answer()
 
             response = {
                 "query": q,
                 "count": len(results),
                 "answer": generated,
                 "results": results,
+                "recommend_laws": recommend_laws,
+                "legal_query": legal_query,
             }
             if LLM_DEBUG:
                 response["debug"] = {

@@ -1,1 +1,4 @@
 ﻿.env
+.codex/
+.vscode/
+ASR/

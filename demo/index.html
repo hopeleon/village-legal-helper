@@ -7,10 +7,16 @@
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
+  <a class="skip-link" href="#chat">跳到对话内容</a>
   <main class="page">
     <aside class="sidebar">
       <div class="brand">乡村法律咨询</div>
-      <button id="newChat" class="ghost full">重新开始</button>
+      <div class="side-sub">面向乡村治理与生活场景的法律助手</div>
+      <button id="newChat" class="ghost full" aria-label="重新开始对话">重新开始</button>
+      <div class="side-search">
+        <label class="sr-only" for="historySearch">搜索对话</label>
+        <input id="historySearch" type="text" placeholder="搜索对话记录" />
+      </div>
       <div class="side-title">本次对话</div>
       <div id="historyList" class="history-list"></div>
     </aside>
@@ -18,27 +24,46 @@
     <section class="main">
       <header class="main-head">
         <div class="head-row">
-          <button id="toggleSidebar" class="ghost mobile-only">查看对话</button>
-          <div>
-            <h1>有什么可以帮到您</h1>
-            <p>描述您的情况，我将结合相关法条给出建议。</p>
+          <button id="toggleSidebar" class="ghost mobile-only" aria-label="查看对话历史">查看对话</button>
+          <div class="head-copy">
+            <h1>乡村法律小帮手</h1>
+            <p>描述您的情况，我会结合相关法条给出清晰可执行的建议。</p>
+          </div>
+          <div class="head-actions">
+            <button id="fill" class="ghost" aria-label="查看示例问题">看个示例</button>
+            <button id="search" aria-label="提交问题">开始咨询</button>
           </div>
         </div>
+        <div class="quick-grid" id="quickGrid"></div>
       </header>
 
-      <div id="chat" class="chat"></div>
+      <div id="chat" class="chat" aria-live="polite"></div>
 
       <div class="composer">
-        <div id="status" class="status"></div>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
         <div class="row">
+          <button id="voiceBtn" class="ghost icon-btn" aria-label="开始语音识别">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="23"></line>
+              <line x1="8" y1="23" x2="16" y2="23"></line>
+            </svg>
+          </button>
+          <label class="sr-only" for="query">输入你的问题</label>
           <input id="query" type="text" placeholder="例如：村里有人乱倒垃圾，影响农田" />
-          <button id="search">提问</button>
-          <button id="fill" class="ghost">看个示例</button>
+          <button id="send" aria-label="提交问题">提问</button>
+        </div>
+        <div id="voiceStatus" class="voice-status" role="status" aria-live="polite">语音识别：未开始</div>
+        <div class="composer-help">
+          <span>可直接描述时间、地点、涉及人员及诉求</span>
+          <button id="clearChat" class="ghost mini" aria-label="清空对话">清空对话</button>
         </div>
       </div>
     </section>
   </main>
 
+  <script src="/asr_helper.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
