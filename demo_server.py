@@ -49,6 +49,15 @@ STOPWORDS = {
     "规定",
 }
 
+try:
+    from rag_langchain import retrieve_passages
+
+    RAG_LANGCHAIN_AVAILABLE = True
+    _RAG_IMPORT_ERROR = None
+except Exception as e:
+    RAG_LANGCHAIN_AVAILABLE = False
+    _RAG_IMPORT_ERROR = f"{type(e).__name__}: {e}"
+
 LEGAL_KEYWORDS = {
     "法",
     "法律",
@@ -264,9 +273,18 @@ INDEX = build_index(CHUNKS)
 
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "deepseek").lower()
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
-LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
+# Legacy common model (kept for backward compatibility).
+LLM_MODEL = os.getenv("LLM_MODEL", "").strip()
+# Legal answers should prefer a stronger reasoning model by default.
+# Only use another legal model when explicitly configured via LLM_MODEL_LEGAL.
+LLM_MODEL_LEGAL = os.getenv("LLM_MODEL_LEGAL", "").strip() or "deepseek-reasoner"
+# General answers keep backward compatibility with old LLM_MODEL.
+LLM_MODEL_GENERAL = os.getenv("LLM_MODEL_GENERAL", "").strip() or (LLM_MODEL or "deepseek-chat")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com").rstrip("/")
 LLM_DEBUG = os.getenv("LLM_DEBUG", "0") == "1"
+RAG_BACKEND = os.getenv("RAG_BACKEND", "langchain").lower()
+RAG_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
+RAG_FETCH_K = int(os.getenv("RAG_FETCH_K", "15"))
 
 
 def _build_user_content(query: str, passages: list, context: str = ""):
@@ -282,23 +300,114 @@ def _build_user_content(query: str, passages: list, context: str = ""):
     return "\n".join(content_lines)
 
 
+def _normalize_passages(passages: list):
+    out = []
+    for p in passages or []:
+        law = (p.get("law", "") if isinstance(p, dict) else "") or ""
+        article = (p.get("article", "") if isinstance(p, dict) else "") or ""
+        text = ""
+        if isinstance(p, dict):
+            text = p.get("text", "") or p.get("content", "") or p.get("page_content", "") or ""
+        out.append({"law": law, "article": article, "text": text})
+    return out
+
+
+def _pick_law_names(passages: list, limit: int = 5):
+    names = []
+    seen = set()
+    for p in passages or []:
+        name = (p.get("law", "") or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+        if len(names) >= limit:
+            break
+    return names
+
+
+def _ensure_law_mentions(answer: str, passages: list):
+    if not answer:
+        return answer
+    names = _pick_law_names(passages, limit=3)
+    if not names:
+        return answer
+    if any(n in answer for n in names):
+        return answer
+    refs = "、".join(f"《{n}》" for n in names)
+    suffix = f"\n\n可重点参考：{refs}。"
+    return answer.rstrip() + suffix
+
+
+def _sanitize_answer_text(answer: str):
+    if not answer:
+        return answer
+    text = answer.strip()
+    # Remove mechanical/meta openings that should not appear in final answer.
+    patterns = [
+        r"^我正在查找相关法条[，,。.\s]*请稍候[，,。.\s]*",
+        r"^根据您提供的法条节选[，,。.\s]*",
+        r"^根据你提供的法条节选[，,。.\s]*",
+        r"^根据您提供的信息[，,。.\s]*",
+        r"^根据你提供的信息[，,。.\s]*",
+    ]
+    for p in patterns:
+        text = re.sub(p, "", text)
+    # Remove awkward second-person phrasing globally in case it appears mid-answer.
+    text = re.sub(r"根据您提供的法条节选[，,。:\s]*", "", text)
+    text = re.sub(r"根据你提供的法条节选[，,。:\s]*", "", text)
+    text = re.sub(r"根据您提供的法条[，,。:\s]*", "", text)
+    text = re.sub(r"根据你提供的法条[，,。:\s]*", "", text)
+    text = re.sub(r"根据您提供的信息[，,。:\s]*", "", text)
+    text = re.sub(r"根据你提供的信息[，,。:\s]*", "", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _ensure_structured_sections(answer: str):
+    if not answer:
+        return answer
+    required = ["【问题定义】", "【法条分析】", "【行动指南】", "【风险与边界提示】"]
+    if all(tag in answer for tag in required):
+        return answer
+    parts = [p.strip() for p in re.split(r"\n{2,}", answer.strip()) if p.strip()]
+    while len(parts) < 4:
+        parts.append(parts[-1] if parts else "请补充事实细节后进一步判断。")
+    structured = (
+        f"【问题定义】{parts[0]}\n\n"
+        f"【法条分析】{parts[1]}\n\n"
+        f"【行动指南】{parts[2]}\n\n"
+        f"【风险与边界提示】{parts[3]}"
+    )
+    return structured
+
+
 def _build_messages(query: str, passages: list, stream: bool, context: str = ""):
+    law_names = _pick_law_names(passages, limit=5)
+    law_name_line = f"候选法条名称：{'; '.join(law_names)}。" if law_names else ""
     user_content = _build_user_content(query, passages, context=context)
     if stream:
         return [
             {
                 "role": "system",
                 "content": (
-                    "你是乡村法律小帮手。根据给定法条节选，用更亲切、易懂的口吻"
-                    "给出说明与建议，避免下结论或替代律师意见。只输出纯文本。"
+                    "你是资深法律咨询助手，服务乡村场景。请基于给定法条节选，"
+                    "给出专业、完整、可执行的建议；不能编造法条。"
+                    "避免替代法官或律师作最终裁判。只输出纯文本。"
                 ),
             },
             {
                 "role": "user",
                 "content": (
                     f"{user_content}\n\n"
-                    "请直接输出整体答复（3-6句）并给出可执行建议（1-3条）。"
-                    "语气要温和、贴近乡村场景，不要标题、不要编号、不要JSON。"
+                    f"{law_name_line}\n"
+                    "请按固定结构输出，并使用以下四个小标题："
+                    "【问题定义】、【法条分析】、【行动指南】、【风险与边界提示】。"
+                    "每个小标题下写2-4句，整体不少于8句。"
+                    "必须点名引用1-3个候选法条名称（使用《法条名》格式）。"
+                    "语气专业但易懂，不要JSON。"
+                    "不要出现“我正在查找相关法条，请稍候”或“根据您提供的法条节选”等过程化话术。"
+                    "引用法律时，优先使用“根据我国《...法》...”的句式，不要使用“根据你/您提供的法条...”句式。"
                 ),
             },
         ]
@@ -306,17 +415,24 @@ def _build_messages(query: str, passages: list, stream: bool, context: str = "")
         {
             "role": "system",
             "content": (
-                "你是乡村法律小帮手。根据给定法条节选，用更亲切、易懂的口吻"
-                "给出说明与建议，避免下结论或替代律师意见。仅输出JSON，不要任何额外文字。"
+                "你是资深法律咨询助手，服务乡村场景。请基于给定法条节选，"
+                "给出专业、完整、可执行的建议；不能编造法条。"
+                "避免替代法官或律师作最终裁判。仅输出JSON，不要任何额外文字。"
             ),
         },
         {
             "role": "user",
             "content": (
                 f"{user_content}\n\n"
+                f"{law_name_line}\n"
                 "请严格只输出JSON，格式：{\"answer\":\"...\"}。\n"
-                "answer为简明整体答复（3-6句）并给出可执行建议（1-3条），"
-                "语气要温和、贴近乡村场景；"
+                "answer需使用四个小标题："
+                "【问题定义】、【法条分析】、【行动指南】、【风险与边界提示】；"
+                "每个小标题下写2-4句，整体不少于8句；"
+                "必须点名引用1-3个候选法条名称（使用《法条名》格式）；"
+                "语气专业但易懂、贴近乡村场景；"
+                "不要出现“我正在查找相关法条，请稍候”或“根据您提供的法条节选”等过程化话术；"
+                "引用法律时，优先使用“根据我国《...法》...”的句式，不要使用“根据你/您提供的法条...”句式；"
                 "不得输出任何说明文字或Markdown。"
             ),
         },
@@ -367,11 +483,12 @@ def call_deepseek_answer(query: str, passages: list, context: str = ""):
     if not LLM_API_KEY:
         return None, "missing_api_key", None
 
+    passages = _normalize_passages(passages)
     payload = {
-        "model": LLM_MODEL,
+        "model": LLM_MODEL_LEGAL,
         "messages": _build_messages(query, passages, stream=False, context=context),
-        "temperature": 0.1,
-        "max_tokens": 300,
+        "temperature": 0.2,
+        "max_tokens": 720,
         "stream": False,
     }
 
@@ -426,7 +543,9 @@ def call_deepseek_answer(query: str, passages: list, context: str = ""):
         content = data["choices"][0]["message"]["content"]
         parsed = _extract_json(content)
         if isinstance(parsed, dict) and isinstance(parsed.get("answer"), str):
-            return parsed["answer"].strip(), None, content
+            cleaned = _sanitize_answer_text(parsed["answer"].strip())
+            cleaned = _ensure_structured_sections(cleaned)
+            return _ensure_law_mentions(cleaned, passages), None, content
         if not isinstance(parsed, dict):
             # One retry with an even stricter prompt
             retry = {
@@ -449,7 +568,9 @@ def call_deepseek_answer(query: str, passages: list, context: str = ""):
             content = data["choices"][0]["message"]["content"]
             parsed = _extract_json(content)
             if isinstance(parsed, dict) and isinstance(parsed.get("answer"), str):
-                return parsed["answer"].strip(), None, content
+                cleaned = _sanitize_answer_text(parsed["answer"].strip())
+                cleaned = _ensure_structured_sections(cleaned)
+                return _ensure_law_mentions(cleaned, passages), None, content
             return content.strip(), "bad_json", content
         return content.strip(), "bad_json_schema", content
     except (URLError, KeyError, ValueError, IndexError) as e:
@@ -461,10 +582,10 @@ def call_deepseek_answer_general(query: str, context: str = ""):
         return None, "missing_api_key", None
 
     payload = {
-        "model": LLM_MODEL,
+        "model": LLM_MODEL_GENERAL,
         "messages": _build_messages_general(query, stream=False, context=context),
         "temperature": 0.1,
-        "max_tokens": 280,
+        "max_tokens": 420,
         "stream": False,
     }
 
@@ -508,7 +629,8 @@ def call_deepseek_answer_general(query: str, context: str = ""):
         content = data["choices"][0]["message"]["content"]
         parsed = _extract_json(content)
         if isinstance(parsed, dict) and isinstance(parsed.get("answer"), str):
-            return parsed["answer"].strip(), None, content
+            cleaned = _sanitize_answer_text(parsed["answer"].strip())
+            return cleaned, None, content
         if not isinstance(parsed, dict):
             retry = {
                 **payload,
@@ -530,7 +652,8 @@ def call_deepseek_answer_general(query: str, context: str = ""):
             content = data["choices"][0]["message"]["content"]
             parsed = _extract_json(content)
             if isinstance(parsed, dict) and isinstance(parsed.get("answer"), str):
-                return parsed["answer"].strip(), None, content
+                cleaned = _sanitize_answer_text(parsed["answer"].strip())
+                return cleaned, None, content
             return content.strip(), "bad_json", content
         return content.strip(), "bad_json_schema", content
     except (URLError, KeyError, ValueError, IndexError) as e:
@@ -542,11 +665,12 @@ def call_deepseek_answer_stream(query: str, passages: list, context: str = ""):
         yield "", "missing_api_key"
         return
 
+    passages = _normalize_passages(passages)
     payload = {
-        "model": LLM_MODEL,
+        "model": LLM_MODEL_LEGAL,
         "messages": _build_messages(query, passages, stream=True, context=context),
-        "temperature": 0.1,
-        "max_tokens": 300,
+        "temperature": 0.2,
+        "max_tokens": 720,
         "stream": True,
     }
 
@@ -593,10 +717,10 @@ def call_deepseek_answer_stream_general(query: str, context: str = ""):
         return
 
     payload = {
-        "model": LLM_MODEL,
+        "model": LLM_MODEL_GENERAL,
         "messages": _build_messages_general(query, stream=True, context=context),
         "temperature": 0.1,
-        "max_tokens": 280,
+        "max_tokens": 420,
         "stream": True,
     }
 
@@ -642,6 +766,26 @@ def _fallback_answer():
         "先把事情的时间、地点、涉及人员和关键证据整理清楚（如照片、视频、聊天记录等）。"
         "可以先找村委、司法所或调解组织帮忙沟通，必要时再咨询律师。"
         "后续若需要维权，也可以走调解或依法起诉的路径。"
+    )
+
+
+def _fallback_answer_with_laws(query: str, passages: list):
+    names = _pick_law_names(passages, limit=3)
+    refs = "、".join(f"《{n}》" for n in names) if names else "相关法律法规"
+    first_text = ""
+    if passages:
+        first_text = (passages[0].get("text", "") or "").strip()
+    evidence_hint = first_text[:80] + ("..." if len(first_text) > 80 else "") if first_text else "请结合当地具体事实与证据进一步核对条款适用。"
+    return (
+        f"【问题定义】你描述的情形属于现实生活中常见且危害性较高的权益侵害/环境治理问题，核心在于尽快制止违法行为并固定证据。"
+        f"争议焦点通常包括：是否构成违法、应由哪个部门先受理、以及后续追责或救济路径如何衔接。"
+        f"【法条分析】可重点参考{refs}。这些法律通常覆盖禁止性规范、监管职责和责任承担机制。"
+        f"在落地判断时，应把行为事实与法条构成要件逐项对应，而不是只看原则性表述。当前检索片段提示：{evidence_hint}"
+        f"【行动指南】第一步先全面固定证据（照片视频、时间地点、受影响范围、证人证言、沟通记录）。"
+        f"第二步向有管辖权的部门实名反映并保留受理回执，必要时同步走村委会/司法所协同处置。"
+        f"第三步根据处理结果选择继续行政投诉、调解或诉讼，形成“取证-受理-处置-追责”闭环。"
+        f"【风险与边界提示】如存在持续性人身风险或公共安全风险，应优先报警或申请紧急保护措施。"
+        f"若涉及未成年人、耕地红线或群体性影响，建议尽快升级到县级主管部门并同步咨询律师。"
     )
 
 
@@ -700,7 +844,16 @@ class Handler(BaseHTTPRequestHandler):
             tokens = tokenize(q)
             tokens = expand_query(q, tokens)
             legal_query = is_legal_query(q, tokens)
-            top = bm25_score(INDEX, tokens, top_n=5, raw_query=q) if (q and legal_query) else []
+            top = []
+            rag_meta = None
+            if q and legal_query:
+                if RAG_BACKEND == "langchain" and RAG_LANGCHAIN_AVAILABLE:
+                    top, rag_meta = retrieve_passages(q, top_k=RAG_TOP_K, fetch_k=RAG_FETCH_K)
+                    # If langchain returns empty/noisy results, fallback to local BM25.
+                    if not top:
+                        top = bm25_score(INDEX, tokens, top_n=RAG_TOP_K, raw_query=q)
+                else:
+                    top = bm25_score(INDEX, tokens, top_n=RAG_TOP_K, raw_query=q)
 
             # If still empty, fall back to boosted laws directly
             if not top and q and legal_query:
@@ -717,6 +870,7 @@ class Handler(BaseHTTPRequestHandler):
                             seen.add(law)
                         if len(top) >= 5:
                             break
+            top = _normalize_passages(top)
             results = [
                 {
                     "law": item.get("law", ""),
@@ -735,6 +889,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._sse_send({"type": "status", "message": msg})
 
                 answer = ""
+                shown = ""
                 gen_error = None
                 if LLM_PROVIDER == "deepseek" and recommend_laws:
                     for delta, err in call_deepseek_answer_stream(q, top, context=context):
@@ -743,7 +898,14 @@ class Handler(BaseHTTPRequestHandler):
                             break
                         if delta:
                             answer += delta
-                            self._sse_send({"type": "answer_delta", "delta": delta})
+                            cleaned = _sanitize_answer_text(answer)
+                            if cleaned.startswith(shown):
+                                out_delta = cleaned[len(shown) :]
+                            else:
+                                out_delta = cleaned
+                            if out_delta:
+                                shown = cleaned
+                                self._sse_send({"type": "answer_delta", "delta": out_delta})
                 if LLM_PROVIDER == "deepseek" and not recommend_laws:
                     for delta, err in call_deepseek_answer_stream_general(q, context=context):
                         if err:
@@ -751,12 +913,35 @@ class Handler(BaseHTTPRequestHandler):
                             break
                         if delta:
                             answer += delta
-                            self._sse_send({"type": "answer_delta", "delta": delta})
+                            cleaned = _sanitize_answer_text(answer)
+                            if cleaned.startswith(shown):
+                                out_delta = cleaned[len(shown) :]
+                            else:
+                                out_delta = cleaned
+                            if out_delta:
+                                shown = cleaned
+                                self._sse_send({"type": "answer_delta", "delta": out_delta})
                 if not answer:
-                    answer = _fallback_answer() if recommend_laws else _fallback_general_answer()
+                    answer = _fallback_answer_with_laws(q, top) if recommend_laws else _fallback_general_answer()
                     if gen_error:
                         self._sse_send({"type": "status", "message": "模型暂时没响应，先给你一份通用建议。"})
                     self._sse_send({"type": "answer_delta", "delta": answer})
+                elif recommend_laws:
+                    ensured = _sanitize_answer_text(answer)
+                    ensured = _ensure_structured_sections(ensured)
+                    ensured = _ensure_law_mentions(ensured, top)
+                    if ensured != answer:
+                        extra = ensured[len(shown) :] if ensured.startswith(shown) else ensured
+                        answer = ensured
+                        if extra:
+                            self._sse_send({"type": "answer_delta", "delta": extra})
+                else:
+                    ensured = _sanitize_answer_text(answer)
+                    if ensured != answer:
+                        extra = ensured[len(shown) :] if ensured.startswith(shown) else ensured
+                        answer = ensured
+                        if extra:
+                            self._sse_send({"type": "answer_delta", "delta": extra})
 
                 self._sse_send(
                     {
@@ -767,17 +952,23 @@ class Handler(BaseHTTPRequestHandler):
                         "legal_query": legal_query,
                     }
                 )
-                if LLM_DEBUG:
-                    self._sse_send(
-                        {
-                            "type": "debug",
-                            "tokens": tokens[:20],
-                            "llm_enabled": bool(LLM_API_KEY),
-                            "llm_error": gen_error,
-                            "model": LLM_MODEL,
-                            "provider": LLM_PROVIDER,
-                        }
-                    )
+            if LLM_DEBUG and stream:
+                self._sse_send(
+                    {
+                        "type": "debug",
+                        "tokens": tokens[:20],
+                        "llm_enabled": bool(LLM_API_KEY),
+                        "llm_error": gen_error,
+                        "model_selected": LLM_MODEL_LEGAL if recommend_laws else LLM_MODEL_GENERAL,
+                        "model_legal": LLM_MODEL_LEGAL,
+                        "model_general": LLM_MODEL_GENERAL,
+                        "provider": LLM_PROVIDER,
+                        "rag_backend": RAG_BACKEND,
+                        "rag_available": RAG_LANGCHAIN_AVAILABLE,
+                        "rag_meta": rag_meta,
+                        "rag_import_error": _RAG_IMPORT_ERROR,
+                    }
+                )
                 self._sse_send({"type": "done"})
                 return
 
@@ -791,7 +982,12 @@ class Handler(BaseHTTPRequestHandler):
                 generated, gen_error, gen_raw = call_deepseek_answer_general(q, context=context)
                 time.sleep(0.1)
             if not generated:
-                generated = _fallback_answer() if recommend_laws else _fallback_general_answer()
+                generated = _fallback_answer_with_laws(q, top) if recommend_laws else _fallback_general_answer()
+            elif recommend_laws:
+                generated = _ensure_structured_sections(_sanitize_answer_text(generated))
+                generated = _ensure_law_mentions(generated, top)
+            else:
+                generated = _sanitize_answer_text(generated)
 
             response = {
                 "query": q,
@@ -806,8 +1002,14 @@ class Handler(BaseHTTPRequestHandler):
                     "tokens": tokens[:20],
                     "llm_enabled": bool(LLM_API_KEY),
                     "llm_error": gen_error,
-                    "model": LLM_MODEL,
+                    "model_selected": LLM_MODEL_LEGAL if recommend_laws else LLM_MODEL_GENERAL,
+                    "model_legal": LLM_MODEL_LEGAL,
+                    "model_general": LLM_MODEL_GENERAL,
                     "provider": LLM_PROVIDER,
+                    "rag_backend": RAG_BACKEND,
+                    "rag_available": RAG_LANGCHAIN_AVAILABLE,
+                    "rag_meta": rag_meta,
+                    "rag_import_error": _RAG_IMPORT_ERROR,
                 }
                 if gen_raw:
                     response["debug"]["llm_raw"] = gen_raw[:800]

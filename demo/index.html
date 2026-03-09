@@ -12,7 +12,11 @@
     <aside class="sidebar">
       <div class="brand">乡村法律咨询</div>
       <div class="side-sub">面向乡村治理与生活场景的法律助手</div>
-      <button id="newChat" class="ghost full" aria-label="重新开始对话">重新开始</button>
+      <button id="newChat" class="ghost full" aria-label="新建聊天会话">新聊天</button>
+      <details class="side-section">
+        <summary>快捷咨询</summary>
+        <div class="quick-grid side-quick" id="quickGrid"></div>
+      </details>
       <div class="side-search">
         <label class="sr-only" for="historySearch">搜索对话</label>
         <input id="historySearch" type="text" placeholder="搜索对话记录" />
@@ -30,14 +34,28 @@
             <p>描述您的情况，我会结合相关法条给出清晰可执行的建议。</p>
           </div>
           <div class="head-actions">
+            <button id="toggleSidebarDesktop" class="ghost desktop-only" aria-label="收起左侧栏">收起左栏</button>
+            <button id="toggleLawPanel" class="ghost desktop-only" aria-label="收起法条面板">收起法条</button>
             <button id="fill" class="ghost" aria-label="查看示例问题">看个示例</button>
             <button id="search" aria-label="提交问题">开始咨询</button>
           </div>
         </div>
-        <div class="quick-grid" id="quickGrid"></div>
       </header>
 
-      <div id="chat" class="chat" aria-live="polite"></div>
+      <div class="content-grid">
+        <div id="chat" class="chat" aria-live="polite"></div>
+        <aside class="law-panel" id="lawPanel" aria-label="法条依据">
+          <div class="law-panel-head">
+            <div>
+              <h2>法条依据</h2>
+              <p id="lawPanelHint">提问后会在这里整理相关法条</p>
+            </div>
+          </div>
+          <div id="lawPanelList" class="law-panel-list">
+            <div class="card empty">暂无法条</div>
+          </div>
+        </aside>
+      </div>
 
       <div class="composer">
         <div id="status" class="status" role="status" aria-live="polite"></div>
